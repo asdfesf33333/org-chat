@@ -418,7 +418,7 @@
     <script>
         // Domain Locking
         const authorizedDomains = ['github.io']; 
-        if (!authorizedDomains.some(d => window.location.hostname.includes(d)) && window.location.hostname !== "iimnagpur.ac.in") {
+        if (!authorizedDomains.some(d => window.location.hostname.includes(d)) && window.location.hostname !== "avaada.com") {
             document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#ef4444;font-family:sans-serif;text-align:center;padding:20px;"><div><h1>UNAUTHORIZED DOMAIN</h1><p>This dashboard is restricted to authorized servers only.</p></div></div>';
             throw new Error("Domain Locked");
         }
