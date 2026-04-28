@@ -532,62 +532,133 @@
                 powerRes.data.forEach(row => {
                     const desig = row["Current Designation"];
                     if (desig) powerMap[desig.toUpperCase()] = {
-                        level: parseInt(row["Level"]) || 99
+                        level: parseInt(row["Level"]) || 99,
+                        corresponding: (row["Corresponding"] || "").trim()
                     };
                 });
 
-                // Map Names to IDs for robust parenting
-                const nameToIdMap = {};
-                sheet1Data.forEach(row => {
-                    if (row["Employee Id"] && row["Full Name"]) {
-                        nameToIdMap[cleanString(row["Full Name"])] = row["Employee Id"];
-                    }
-                });
-
                 const nodes = [];
-                const rootId = "Avaada_Root";
-                
-                // Base Root Node
-                nodes.push({
-                    id: rootId, parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
-                    employeeName: "Corporate Structure", designation: "NAGPUR PLANT"
+                const nodeMap = new Set();
+                let rootEmployee = null;
+                const deptEmployees = {};
+
+                // Find specialized roles (Root/Dept Head)
+                sheet1Data.forEach(row => {
+                    const desig = cleanString(row["Current Designation"]);
+                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
+                    if (pInfo.corresponding.toLowerCase() === "root") { rootEmployee = row; row._processed = true; }
+                    else if (pInfo.corresponding.toLowerCase() === "current department") {
+                        const dept = cleanString(row["Current Department"]);
+                        if (!deptEmployees[dept]) deptEmployees[dept] = row;
+                        row._processed = true;
+                    }
                 });
 
-                sheet1Data.forEach(row => {
-                    const id = row["Employee Id"];
-                    const name = cleanString(row["Full Name"]);
-                    const managerName = cleanString(row["Reporting Manager"]);
-                    const desig = cleanString(row["Current Designation"]);
-                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
+                // 1. Root Node
+                nodes.push({
+                    id: "Root", parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
+                    employeeName: rootEmployee ? cleanString(rootEmployee["Full Name"]) : "Nagpur Plant",
+                    employeeId: rootEmployee ? cleanString(rootEmployee["Employee Id"]) : "AVAADA",
+                    designation: rootEmployee ? cleanString(rootEmployee["Current Designation"]) : "CORPORATE"
+                });
+                nodeMap.add("Root");
 
-                    let parentId = rootId; // Default to root
-                    if (managerName && managerName !== "Avaada" && nameToIdMap[managerName]) {
-                        parentId = nameToIdMap[managerName];
+                const deptEmployeesList = {};
+
+                // 2. Build Categorical Branches and Assign Employees
+                sheet1Data.forEach(row => {
+                    if (row._processed) return;
+                    const name = cleanString(row["Full Name"]);
+                    const id = row["Employee Id"];
+                    if (!name || !id) return;
+
+                    const phase = cleanString(row["Phase"]) || "General";
+                    const func = cleanString(row["Functions"]) || "Operations";
+                    const dept = cleanString(row["Current Department"]) || "Plant";
+
+                    const phaseId = `Phase_${phase}`;
+                    const funcId = `${phaseId}_Func_${func}`;
+                    const deptId = `${funcId}_Dept_${dept}`;
+
+                    // Ensure branch nodes exist
+                    if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
+                    if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
+                    if (!nodeMap.has(deptId)) {
+                        const dEmp = deptEmployees[dept];
+                        nodes.push({
+                            id: deptId, parentId: funcId, name: dept, type: "department",
+                            employeeName: dEmp ? cleanString(dEmp["Full Name"]) : "",
+                            employeeId: dEmp ? cleanString(dEmp["Employee Id"]) : "",
+                            designation: dEmp ? cleanString(dEmp["Current Designation"]) : ""
+                        });
+                        nodeMap.add(deptId);
                     }
 
-                    nodes.push({
+                    if (!deptEmployeesList[deptId]) deptEmployeesList[deptId] = [];
+                    const pInfo = powerMap[cleanString(row["Current Designation"]).toUpperCase()] || { level: 99 };
+                    
+                    deptEmployeesList[deptId].push({
                         id: id,
-                        parentId: parentId,
                         name: name,
                         employeeName: name,
                         employeeId: id,
-                        designation: desig,
+                        designation: cleanString(row["Current Designation"]),
                         type: (name === "Vacant Position") ? "vacancy" : "employee",
-                        level: pInfo.level,
-                        reportees: 0,
-                        vacancies: 0
+                        level: pInfo.level
                     });
                 });
 
-                // Calculate reportee/vacancy counts
-                const nodeLookup = {};
-                nodes.forEach(n => nodeLookup[n.id] = n);
-                nodes.forEach(n => {
-                    if (n.parentId && nodeLookup[n.parentId]) {
-                        if (n.type === 'vacancy') nodeLookup[n.parentId].vacancies++;
-                        else nodeLookup[n.parentId].reportees++;
-                    }
+                // 3. Attach Employees to Departments with Level-based Parenting
+                Object.keys(deptEmployeesList).forEach(deptId => {
+                    const emps = deptEmployeesList[deptId];
+                    const levelsObj = {};
+                    emps.forEach(emp => { 
+                        if (!levelsObj[emp.level]) levelsObj[emp.level] = []; 
+                        levelsObj[emp.level].push(emp); 
+                    });
+                    
+                    const sortedLevels = Object.keys(levelsObj).map(Number).sort((a, b) => a - b);
+                    let currentParentId = deptId;
+                    
+                    sortedLevels.forEach(level => {
+                        const levelEmps = levelsObj[level];
+                        levelEmps.forEach(emp => { 
+                            nodes.push({ ...emp, parentId: currentParentId }); 
+                        });
+                        // The first person of the higher level becomes the parent for the next level
+                        currentParentId = levelEmps[0].id;
+                    });
                 });
+
+                // 4. Final Count Calculations
+                const childrenMap = {};
+                nodes.forEach(n => { 
+                    if (n.parentId) { 
+                        if (!childrenMap[n.parentId]) childrenMap[n.parentId] = []; 
+                        childrenMap[n.parentId].push(n.id); 
+                    } 
+                });
+
+                function calculateCounts(nodeId) {
+                    const node = nodes.find(n => n.id === nodeId);
+                    if (!node) return { r: 0, v: 0 };
+                    let r = (node.type === 'employee') ? 1 : 0;
+                    let v = (node.type === 'vacancy') ? 1 : 0;
+                    
+                    // Count head-count in grouping nodes
+                    if ((node.type === 'root' || node.type === 'department') && node.employeeName) {
+                        if (node.employeeName === 'Vacant Position') v++; else r++;
+                    }
+
+                    (childrenMap[nodeId] || []).forEach(childId => { 
+                        const c = calculateCounts(childId); 
+                        r += c.r; v += c.v; 
+                    });
+                    node.reportees = r; 
+                    node.vacancies = v;
+                    return { r, v };
+                }
+                calculateCounts("Root");
 
                 renderChart(nodes);
                 populateDropdowns();
@@ -744,6 +815,10 @@
         };
 
         async function submitToSheet(data) {
+            const loadingEl = document.getElementById('loading');
+            loadingEl.style.display = 'block';
+            loadingEl.innerText = "Syncing with Cloud Database...";
+            
             try {
                 await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
@@ -752,8 +827,16 @@
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(data)
                 });
-                alert("Submitted successfully.");
-            } catch (err) { alert("Submission failed."); }
+                
+                // Real-time Refresh
+                setTimeout(async () => {
+                    await initChart();
+                    alert("Sync Success: Data updated in real-time.");
+                }, 1500);
+            } catch (err) { 
+                alert("Submission failed."); 
+                loadingEl.style.display = 'none';
+            }
         }
 
         window.downloadPNG = function () {
