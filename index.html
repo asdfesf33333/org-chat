@@ -283,6 +283,10 @@
       ==============================================================================
       This elements tab contains restricted corporate data.
     -->
+    <div id="restricted-notice" style="display:none;" data-encryption="AES-256-GCM"
+        data-notice="RESTRICTED CORPORATE ASSET">
+    </div>
+
     <div id="security-notice" style="display:none;" data-status="RESTRICTED" data-owner="Avaada Nagpur">
         OFFICIAL CORPORATE DASHBOARD - AUTHORIZED USE ONLY
         <!-- Encrypted Security Image Placeholder -->
@@ -422,19 +426,8 @@
     </div>
 
     <script>
-        /*
-         * ==============================================================================
-         * ! RESTRICTED ACCESS NOTICE !
-         * ==============================================================================
-         * This source code and the associated dashboard are the property of 
-         * Avaada (Nagpur Plant). Unauthorized inspection, modification, or 
-         * redistribution of this script is strictly prohibited.
-         * 
-         * Access Level: AUTHORIZED PERSONNEL ONLY
-         * Security Protocol: ENC-v4.2-ACTIVE
-         * ==============================================================================
-         */
-
+        // --- Configuration & Obfuscated URLs ---
+        // --- Configuration & Obfuscated URLs ---
         const _atob = (s) => {
             try {
                 if (!s) return "";
@@ -444,6 +437,7 @@
             } catch (e) { return s; }
         };
 
+        // Worksheets (ENCRYPTED URLS)
         const mainUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTA=");
         const powerUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTIwNDUzNTIzNTY=");
         const passwordsUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTEyOTY4MzkxMA==");
@@ -453,6 +447,7 @@
         window.chart = null;
         let sheet1Data = [];
 
+        // --- Authentication ---
         window.handleLogin = async function () {
             const id = document.getElementById('login-id').value;
             const pass = document.getElementById('login-pass').value;
@@ -465,97 +460,178 @@
             }
 
             try {
+                // If GID is still a placeholder or incorrect, fetch will fail
                 const response = await fetch(passwordsUrl);
-                if (!response.ok) throw new Error("Auth sync failed.");
+                if (!response.ok) {
+                    console.error("Fetch failed for:", passwordsUrl);
+                    throw new Error("Sheet access blocked or GID invalid. Please check your passwordsUrl GID.");
+                }
                 const csvText = await response.text();
                 const authData = Papa.parse(csvText, { header: true }).data;
                 const user = authData.find(u => u["Login ID"] === id && u["Password"] === pass);
 
                 if (user) {
                     document.getElementById('login-overlay').style.display = 'none';
-                    if(document.getElementById('security-image')) {
-                        document.getElementById('security-image').src = pictureUrl;
-                    }
                     initChart();
+                    showConsolePicture();
                 } else {
                     errorEl.style.display = 'block';
                     errorEl.innerText = "Invalid ID or Password";
                 }
             } catch (err) {
-                errorEl.innerText = "Auth failed. Access restricted.";
+                console.error("Auth error:", err);
+                errorEl.innerText = "Auth failed. Ensure PASSWORDS_GID is correct and access is public.";
                 errorEl.style.display = 'block';
             }
         };
+
+        async function showConsolePicture() {
+            try {
+                // Supplemental textual warning
+                console.log("%c STOP! \n%cThis is a restricted corporate dashboard. Unauthorized inspection is prohibited.",
+                    "color: red; font-size: 50px; font-weight: bold; font-family: sans-serif; text-shadow: 2px 2px 0px black;",
+                    "color: white; font-size: 16px; background: #1e293b; padding: 10px; border-radius: 5px;");
+
+                const response = await fetch(pictureUrl);
+                const csvText = await response.text();
+                const picData = Papa.parse(csvText, { header: false }).data;
+                let imgStr = picData[0][0];
+                if (imgStr) {
+                    imgStr = imgStr.trim();
+                    let finalUrl = imgStr;
+
+                    // Try decoding using our base64 _atob
+                    let decoded = _atob(imgStr);
+                    if (decoded.startsWith('http') || decoded.startsWith('data:')) {
+                        finalUrl = decoded;
+                    } else if (!imgStr.startsWith('http') && !imgStr.startsWith('data:')) {
+                        // Assuming raw base64 image content without data prefix
+                        finalUrl = `data:image/png;base64,${imgStr}`;
+                    }
+
+                    console.log("%c ", `padding: 150px; line-height: 300px; background: url('${finalUrl}') no-repeat center; background-size: contain;`);
+                }
+            } catch (e) { console.log("Login picture not configured."); }
+        }
+
+        // Execute immediately to appear as soon as DevTools is opened
+        showConsolePicture();
 
         function cleanString(str) { return str ? str.trim().replace(/\s+/g, ' ') : "Unknown"; }
 
         async function initChart() {
             const loadingEl = document.getElementById('loading');
             loadingEl.style.display = 'block';
-            loadingEl.innerText = "Syncing Real-time Hierarchy...";
-            
             try {
-                document.querySelector('.chart-container').innerHTML = '';
-
                 const [mainRes, powerRes] = await Promise.all([
                     new Promise((res, rej) => Papa.parse(mainUrl, { download: true, header: true, complete: res, error: rej })),
                     new Promise((res, rej) => Papa.parse(powerUrl, { download: true, header: true, complete: res, error: rej }))
                 ]);
 
-                sheet1Data = mainRes.data.filter(r => r["Full Name"]);
+                sheet1Data = mainRes.data;
                 const powerMap = {};
                 powerRes.data.forEach(row => {
                     const desig = row["Current Designation"];
-                    if (desig) powerMap[desig.toUpperCase()] = { level: parseInt(row["Level"]) || 99 };
-                });
-
-                const nameToIdMap = {};
-                sheet1Data.forEach(row => {
-                    if (row["Employee Id"] && row["Full Name"]) {
-                        nameToIdMap[cleanString(row["Full Name"])] = row["Employee Id"];
-                    }
+                    if (desig) powerMap[desig.toUpperCase()] = {
+                        level: parseInt(row["Level"]) || 99,
+                        corresponding: (row["Corresponding"] || "").trim()
+                    };
                 });
 
                 const nodes = [];
-                const rootId = "Avaada_Root";
-                nodes.push({
-                    id: rootId, parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
-                    employeeName: "Corporate Structure", designation: "NAGPUR PLANT"
-                });
+                const nodeMap = new Set();
+                let rootEmployee = null;
+                const deptEmployees = {};
 
                 sheet1Data.forEach(row => {
-                    const id = row["Employee Id"];
-                    const name = cleanString(row["Full Name"]);
-                    const managerName = cleanString(row["Reporting Manager"]);
                     const desig = cleanString(row["Current Designation"]);
-                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
+                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
+                    if (pInfo.corresponding.toLowerCase() === "root") { rootEmployee = row; row._processed = true; }
+                    else if (pInfo.corresponding.toLowerCase() === "current department") {
+                        const dept = cleanString(row["Current Department"]);
+                        if (!deptEmployees[dept]) deptEmployees[dept] = row;
+                        row._processed = true;
+                    }
+                });
 
-                    let parentId = rootId;
-                    if (managerName && managerName !== "Avaada" && nameToIdMap[managerName]) {
-                        parentId = nameToIdMap[managerName];
+                nodes.push({
+                    id: "Root", parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
+                    employeeName: rootEmployee ? cleanString(rootEmployee["Full Name"]) : "",
+                    employeeId: rootEmployee ? cleanString(rootEmployee["Employee Id"]) : "",
+                    designation: rootEmployee ? cleanString(rootEmployee["Current Designation"]) : ""
+                });
+                nodeMap.add("Root");
+
+                const deptEmployeesList = {};
+                sheet1Data.forEach(row => {
+                    if (row._processed) return;
+                    const name = cleanString(row["Full Name"]);
+                    if (!name || name === "Unknown" || !row["Employee Id"]) return;
+
+                    const phase = cleanString(row["Phase"]);
+                    const func = cleanString(row["Functions"]);
+                    const dept = cleanString(row["Current Department"]);
+                    const phaseId = `Phase_${phase}`;
+                    const funcId = `${phaseId}_Func_${func}`;
+                    const deptId = `${funcId}_Dept_${dept}`;
+
+                    if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
+                    if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
+                    if (!nodeMap.has(deptId)) {
+                        const dEmp = deptEmployees[dept];
+                        nodes.push({
+                            id: deptId, parentId: funcId, name: dept, type: "department",
+                            employeeName: dEmp ? cleanString(dEmp["Full Name"]) : "",
+                            employeeId: dEmp ? cleanString(dEmp["Employee Id"]) : "",
+                            designation: dEmp ? cleanString(dEmp["Current Designation"]) : ""
+                        });
+                        nodeMap.add(deptId);
                     }
 
-                    nodes.push({
-                        id: id, parentId: parentId, name: name, employeeName: name, employeeId: id,
-                        designation: desig, type: (name === "Vacant Position") ? "vacancy" : "employee",
-                        level: pInfo.level, reportees: 0, vacancies: 0
+                    if (!deptEmployeesList[deptId]) deptEmployeesList[deptId] = [];
+                    const pInfo = powerMap[cleanString(row["Current Designation"]).toUpperCase()] || { level: 99 };
+                    deptEmployeesList[deptId].push({
+                        id: `Emp_${row["Employee Id"]}`, name: name, designation: cleanString(row["Current Designation"]),
+                        type: (name === "Vacant Position") ? "vacancy" : "employee", employeeId: row["Employee Id"], level: pInfo.level
                     });
                 });
 
-                const nodeLookup = {};
-                nodes.forEach(n => nodeLookup[n.id] = n);
-                nodes.forEach(n => {
-                    if (n.parentId && nodeLookup[n.parentId]) {
-                        if (n.type === 'vacancy') nodeLookup[n.parentId].vacancies++;
-                        else nodeLookup[n.parentId].reportees++;
-                    }
+                Object.keys(deptEmployeesList).forEach(deptId => {
+                    const emps = deptEmployeesList[deptId];
+                    const levelsObj = {};
+                    emps.forEach(emp => { if (!levelsObj[emp.level]) levelsObj[emp.level] = []; levelsObj[emp.level].push(emp); });
+                    const sortedLevels = Object.keys(levelsObj).map(Number).sort((a, b) => a - b);
+                    let currentParentId = deptId;
+                    sortedLevels.forEach(level => {
+                        const levelEmps = levelsObj[level];
+                        levelEmps.forEach(emp => { nodes.push({ ...emp, parentId: currentParentId }); });
+                        currentParentId = levelEmps[0].id;
+                    });
                 });
+
+                const childrenMap = {};
+                nodes.forEach(n => { if (n.parentId) { if (!childrenMap[n.parentId]) childrenMap[n.parentId] = []; childrenMap[n.parentId].push(n.id); } });
+
+                function calculateCounts(nodeId) {
+                    const node = nodes.find(n => n.id === nodeId);
+                    if (!node) return { r: 0, v: 0 };
+                    let r = node.type === 'employee' ? 1 : 0;
+                    let v = node.type === 'vacancy' ? 1 : 0;
+                    if ((node.type === 'root' || node.type === 'department') && node.employeeName && node.employeeName !== 'Unknown') {
+                        if (node.employeeName === 'Vacant Position') v++; else r++;
+                    }
+                    (childrenMap[nodeId] || []).forEach(childId => { const c = calculateCounts(childId); r += c.r; v += c.v; });
+                    node.reportees = r; node.vacancies = v;
+                    return { r, v };
+                }
+                calculateCounts("Root");
 
                 renderChart(nodes);
                 populateDropdowns();
                 loadingEl.style.display = 'none';
             } catch (err) {
-                loadingEl.innerText = 'Sync failed.';
+                loadingEl.innerText = 'Error loading data.';
+                console.error(err);
             }
         }
 
@@ -566,36 +642,17 @@
                 .container('.chart-container')
                 .data(data)
                 .nodeWidth(d => 260)
-                .nodeHeight(d => 160)
+                .nodeHeight(d => (d.data.employeeName || d.data.type === 'employee' || d.data.type === 'vacancy') ? 160 : 115)
                 .onNodeClick(d => {
                     activeNodeId = d.data.id;
                     window.chart.clearHighlighting();
                     window.chart.setUpToTheRootHighlighted(d.data.id).render();
                 })
                 .linkUpdate(function (d, i, arr) {
-                    const isDark = document.body.classList.contains('dark-theme');
-                    const color = isDark ? '#00ffff' : '#6366f1';
-                    
                     d3.select(this)
-                        .attr('stroke', color)
-                        .attr('stroke-width', isDark ? 4 : 2)
-                        .style('filter', isDark ? 'drop-shadow(0 0 10px rgba(0, 255, 255, 0.9))' : 'none');
-
-                    const svg = d3.select(this.ownerSVGElement);
-                    if (svg.select('#arrowhead').empty()) {
-                        svg.append('defs').append('marker')
-                            .attr('id', 'arrowhead')
-                            .attr('viewBox', '0 -5 10 10')
-                            .attr('refX', 22)
-                            .attr('refY', 0)
-                            .attr('markerWidth', 7)
-                            .attr('markerHeight', 7)
-                            .attr('orient', 'auto')
-                            .append('path')
-                            .attr('d', 'M0,-5L10,0L0,5')
-                            .attr('fill', color);
-                    }
-                    d3.select(this).attr('marker-end', 'url(#arrowhead)');
+                        .attr('stroke', document.body.classList.contains('dark-theme') ? '#0ea5e9' : '#6366f1')
+                        .attr('stroke-width', document.body.classList.contains('dark-theme') ? 3 : 2)
+                        .style('filter', document.body.classList.contains('dark-theme') ? 'drop-shadow(0 0 5px rgba(14, 165, 233, 0.8))' : 'none');
                 })
                 .nodeContent(function (d) {
                     const isDark = document.body.classList.contains('dark-theme');
@@ -607,8 +664,20 @@
 
                     switch (d.data.type) {
                         case 'root': color = '#10b981'; break;
+                        case 'phase': color = '#3b82f6'; title = 'PHASE'; break;
+                        case 'function': color = '#f59e0b'; title = 'FUNCTION'; break;
+                        case 'department': color = '#8b5cf6'; break;
                         case 'employee': color = '#0ea5e9'; break;
                         case 'vacancy': color = '#ef4444'; title = title || 'VACANT POSITION'; break;
+                    }
+
+                    let extra = '';
+                    if (d.data.employeeName) {
+                        extra = `<div style="font-size:15px;font-weight:700;color:${textColor};margin-top:8px;">${d.data.employeeName}</div>`;
+                        if (d.data.employeeId) extra += `<div style="font-size:12px;color:${subColor};">ID: ${d.data.employeeId}</div>`;
+                    } else if (d.data.type === 'employee' || d.data.type === 'vacancy') {
+                        extra = `<div style="font-size:15px;font-weight:700;color:${textColor};margin-top:8px;">${d.data.name}</div>`;
+                        if (d.data.employeeId) extra += `<div style="font-size:12px;color:${subColor};">ID: ${d.data.employeeId}</div>`;
                     }
 
                     const updateBtn = (d.data.type === 'vacancy') ?
@@ -616,8 +685,8 @@
 
                     return `<div style="font-family:'Inter',sans-serif;background-color:${bgColor};width:${d.width}px;height:${d.height}px;border-radius:12px;border-top:5px solid ${color};padding:15px;box-sizing:border-box;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
                         <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:0.05em;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;">${title}</div>
-                        <div style="font-size:15px;font-weight:700;color:${textColor};margin-top:8px;">${d.data.employeeName || d.data.name}</div>
-                        ${d.data.employeeId ? `<div style="font-size:12px;color:${subColor};">ID: ${d.data.employeeId}</div>` : ''}
+                        ${(d.data.type !== 'employee' && d.data.type !== 'vacancy') ? `<div style="font-size:16px;font-weight:700;color:${textColor};margin-top:4px;">${d.data.name}</div>` : ''}
+                        ${extra}
                         ${updateBtn}
                         <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12px;font-weight:600;color:${subColor};">
                             <div><span style="color:#10b981;margin-right:3px;">*</span>Rep: ${d.data.reportees || 0}</div>
@@ -692,9 +761,6 @@
         };
 
         async function submitToSheet(data) {
-            const loadingEl = document.getElementById('loading');
-            loadingEl.style.display = 'block';
-            loadingEl.innerText = "Syncing with Cloud Database...";
             try {
                 await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
@@ -703,19 +769,15 @@
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(data)
                 });
-                setTimeout(async () => {
-                    await initChart();
-                    alert("Sync Success: Data updated in real-time.");
-                }, 1500);
-            } catch (err) { 
-                alert("Submission failed."); 
-                loadingEl.style.display = 'none';
-            }
+                alert("Submitted successfully.");
+            } catch (err) { alert("Submission failed."); }
         }
 
         window.downloadPNG = function () {
             if (!window.chart) return;
+
             if (activeNodeId) {
+                // Collapse all unselected branches and only expand the selected one
                 window.chart.collapseAll();
                 const state = window.chart.getChartState();
                 let curr = state.allNodes.find(n => n.data.id === activeNodeId);
@@ -726,6 +788,8 @@
                 window.chart.setExpanded(activeNodeId);
                 window.chart.render().fit();
             }
+
+            // Wait for animations before exporting
             setTimeout(() => {
                 window.chart.exportImg({
                     full: true, scale: 3,
@@ -745,4 +809,5 @@
         };
     </script>
 </body>
+
 </html>
