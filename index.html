@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Organization Chart</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- D3.js and Org Chart Library -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-org-chart@2.6.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-flextree@2.1.2/build/d3-flextree.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- Tom Select for searchable dropdowns -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg-light: #f8fafc;
+            --bg-dark: #0f172a;
+            --card-light: #ffffff;
+            --card-dark: #1e293b;
+            --text-light: #1e293b;
+            --text-dark: #f1f5f9;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-dark: rgba(30, 41, 59, 0.7);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+            overflow: hidden;
+        }
+
+        body.light-theme {
+            background-color: var(--bg-light);
+            color: var(--text-light);
+        }
+
+        body.dark-theme {
+            background-color: var(--bg-dark);
+            color: var(--text-dark);
+        }
+
+        /* Login Overlay */
+        #login-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-card {
+            background: var(--card-dark);
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .login-card h2 {
+            margin-bottom: 1.5rem;
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .login-card input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            box-sizing: border-box;
+        }
+
+        .login-card button {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .login-card button:hover {
+            background: var(--primary-hover);
+        }
+
+        #login-error {
+            color: #ef4444;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        /* Dashboard Header */
+        .dashboard-header {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            gap: 15px;
+            z-index: 1000;
+            background: var(--glass);
+            padding: 10px 20px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .dark-theme .dashboard-header {
+            background: var(--glass-dark);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 25px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: inherit;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .dark-theme .btn-secondary {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Chart Container */
+        .chart-container {
+            width: 100vw;
+            height: 100vh;
+            background-color: transparent;
+        }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--card-light);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .dark-theme .modal-content {
+            background: var(--card-dark);
+            color: #fff;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.6rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #ddd;
+            background: transparent;
+            color: inherit;
+            box-sizing: border-box;
+        }
+
+        .dark-theme .form-group input,
+        .dark-theme .form-group select {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: 600;
+            z-index: 1500;
+        }
+
+        /* Tom Select Dark Mode Fixes */
+        .ts-control {
+            border-radius: 0.5rem !important;
+            padding: 0.6rem 1rem !important;
+            border: 1px solid #ddd !important;
+        }
+
+        .dark-theme .ts-control,
+        .dark-theme .ts-control input {
+            background-color: #1e293b !important;
+            color: #fff !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        .dark-theme .ts-dropdown,
+        .dark-theme .ts-dropdown .option {
+            background-color: #1e293b !important;
+            color: #fff !important;
+        }
+
+        .dark-theme .ts-dropdown .option.active,
+        .dark-theme .ts-dropdown .option:hover {
+            background-color: #334155 !important;
+            color: #fff !important;
+        }
+    </style>
+</head>
+
+<body class="dark-theme">
+    <div id="login-overlay">
+        <div class="login-card">
+            <h2>Welcome Back</h2>
+            <input type="text" id="login-id" placeholder="Login ID">
+            <input type="password" id="login-pass" placeholder="Password">
+            <button onclick="handleLogin()">Sign In</button>
+            <div id="login-error">Invalid credentials. Please try again.</div>
+        </div>
+    </div>
+
+    <div id="loading" style="display: none;">Syncing Org Chart...</div>
+
+    <div class="dashboard-header">
+        <button class="btn btn-primary" onclick="showAddVacancyModal()">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            Add Vacancy
+        </button>
+        <button class="btn btn-secondary" onclick="downloadPNG()">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+            Export PNG
+        </button>
+        <button class="btn btn-secondary" onclick="toggleTheme()">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+            </svg>
+            Theme
+        </button>
+    </div>
+
+    <div class="chart-container"></div>
+
+    <!-- Add Vacancy Modal -->
+    <div id="add-vacancy-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 style="margin-top:0">New Vacancy</h3>
+            <form id="add-vacancy-form">
+                <div class="form-group">
+                    <label>Department</label>
+                    <select id="vac-dept" required></select>
+                </div>
+                <div class="form-group">
+                    <label>Designation</label>
+                    <select id="vac-desig" required></select>
+                </div>
+                <div class="form-group">
+                    <label>Reporting Manager</label>
+                    <select id="vac-manager" required></select>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" style="flex:1">Add Vacancy</button>
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('add-vacancy-modal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Update Details Modal -->
+    <div id="update-details-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 style="margin-top:0">Fill Vacancy</h3>
+            <form id="update-details-form">
+                <input type="hidden" id="target-vac-id">
+                <div class="form-group">
+                    <label>Employee ID</label>
+                    <input type="text" id="upd-emp-id" required>
+                </div>
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="upd-emp-name" required>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Date of Birth</label>
+                        <input type="date" id="upd-dob" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Date of Joining</label>
+                        <input type="date" id="upd-doj" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Gender</label>
+                    <select id="upd-gender">
+                        <option>Male</option>
+                        <option>Female</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Official Email</label>
+                    <input type="email" id="upd-email" required>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Grade</label>
+                        <input type="text" id="upd-grade" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Total Exp (Yrs)</label>
+                        <input type="number" step="0.1" id="upd-total-exp" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Confirmation Status</label>
+                    <select id="upd-confirm">
+                        <option>Confirmed</option>
+                        <option>Probation</option>
+                        <option>Contract</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Function</label>
+                    <select id="upd-func"></select>
+                </div>
+                <div class="form-group">
+                    <label>Phase</label>
+                    <select id="upd-phase"></select>
+                </div>
+                <div class="form-group">
+                    <label>Management Cadre</label>
+                    <select id="upd-cadre"></select>
+                </div>
+                <div class="form-group">
+                    <label>Current Exp (Yrs)</label>
+                    <input type="number" step="0.1" id="upd-curr-exp" required>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" style="flex:1">Update & Onboard</button>
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('update-details-modal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration & Obfuscated URLs ---
+        // --- Configuration & Obfuscated URLs ---
+        const _atob = (s) => {
+            try {
+                if (!s) return "";
+                let standard = s.replace(/-/g, '+').replace(/_/g, '/');
+                while (standard.length % 4) standard += '=';
+                return window.atob(standard);
+            } catch (e) { return s; }
+        };
+
+        // Worksheets (ENCRYPTED URLS)
+        const mainUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTA=");
+        const powerUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTIwNDUzNTIzNTY=");
+        const passwordsUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTEyOTY4MzkxMA==");
+        const pictureUrl = _atob("aHR0cHM6Ly9kb2NzLmdvb2dsZS5jb20vc3ByZWFkc2hlZXRzL2QvMXRZY25DVUc2Q2lZVkVFMUloZzN6QkNGLU9ZekhoN05hcEs1clRmYnE0QzQvZXhwb3J0P2Zvcm1hdD1jc3YmZ2lkPTY4MDU0NTYzNQ==");
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQp6OLVFscWOv-dS0zif2WsIJisIRTOeCOndd98jn_fOagEKpp-55OP64cxQfbz2RH/exec";
+
+        window.chart = null;
+        let sheet1Data = [];
+
+        // --- Authentication ---
+        window.handleLogin = async function () {
+            const id = document.getElementById('login-id').value;
+            const pass = document.getElementById('login-pass').value;
+            const errorEl = document.getElementById('login-error');
+
+            if (id === "admin" && pass === "admin") {
+                document.getElementById('login-overlay').style.display = 'none';
+                initChart();
+                return;
+            }
+
+            try {
+                // If GID is still a placeholder or incorrect, fetch will fail
+                const response = await fetch(passwordsUrl);
+                if (!response.ok) {
+                    console.error("Fetch failed for:", passwordsUrl);
+                    throw new Error("Sheet access blocked or GID invalid. Please check your passwordsUrl GID.");
+                }
+                const csvText = await response.text();
+                const authData = Papa.parse(csvText, { header: true }).data;
+                const user = authData.find(u => u["Login ID"] === id && u["Password"] === pass);
+
+                if (user) {
+                    document.getElementById('login-overlay').style.display = 'none';
+                    initChart();
+                    showConsolePicture();
+                } else {
+                    errorEl.style.display = 'block';
+                    errorEl.innerText = "Invalid ID or Password";
+                }
+            } catch (err) {
+                console.error("Auth error:", err);
+                errorEl.innerText = "Auth failed. Ensure PASSWORDS_GID is correct and access is public.";
+                errorEl.style.display = 'block';
+            }
+        };
+
+        async function showConsolePicture() {
+            try {
+                // Supplemental textual warning
+                console.log("%c STOP! \n%cThis is a restricted corporate dashboard. Unauthorized inspection is prohibited.",
+                    "color: red; font-size: 50px; font-weight: bold; font-family: sans-serif; text-shadow: 2px 2px 0px black;",
+                    "color: white; font-size: 16px; background: #1e293b; padding: 10px; border-radius: 5px;");
+
+                const response = await fetch(pictureUrl);
+                const csvText = await response.text();
+                const picData = Papa.parse(csvText, { header: false }).data;
+                let imgStr = picData[0][0];
+                if (imgStr) {
+                    imgStr = imgStr.trim();
+                    let finalUrl = imgStr;
+
+                    // Try decoding using our base64 _atob
+                    let decoded = _atob(imgStr);
+                    if (decoded.startsWith('http') || decoded.startsWith('data:')) {
+                        finalUrl = decoded;
+                    } else if (!imgStr.startsWith('http') && !imgStr.startsWith('data:')) {
+                        // Assuming raw base64 image content without data prefix
+                        finalUrl = `data:image/png;base64,${imgStr}`;
+                    }
+
+                    console.log("%c ", `padding: 150px; line-height: 300px; background: url('${finalUrl}') no-repeat center; background-size: contain;`);
+                }
+            } catch (e) { console.log("Login picture not configured."); }
+        }
+
+        // Execute immediately to appear as soon as DevTools is opened
+        showConsolePicture();
+
+        function cleanString(str) { return str ? str.trim().replace(/\s+/g, ' ') : "Unknown"; }
+
+        async function initChart() {
+            const loadingEl = document.getElementById('loading');
+            loadingEl.style.display = 'block';
+            try {
+                const [mainRes, powerRes] = await Promise.all([
+                    new Promise((res, rej) => Papa.parse(mainUrl, { download: true, header: true, complete: res, error: rej })),
+                    new Promise((res, rej) => Papa.parse(powerUrl, { download: true, header: true, complete: res, error: rej }))
+                ]);
+
+                sheet1Data = mainRes.data;
+                const powerMap = {};
+                powerRes.data.forEach(row => {
+                    const desig = row["Current Designation"];
+                    if (desig) powerMap[desig.toUpperCase()] = {
+                        level: parseInt(row["Level"]) || 99,
+                        corresponding: (row["Corresponding"] || "").trim()
+                    };
+                });
+
+                const nodes = [];
+                const nodeMap = new Set();
+                let rootEmployee = null;
+                const deptEmployees = {};
+
+                sheet1Data.forEach(row => {
+                    const desig = cleanString(row["Current Designation"]);
+                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
+                    if (pInfo.corresponding.toLowerCase() === "root") { rootEmployee = row; row._processed = true; }
+                    else if (pInfo.corresponding.toLowerCase() === "current department") {
+                        const dept = cleanString(row["Current Department"]);
+                        if (!deptEmployees[dept]) deptEmployees[dept] = row;
+                        row._processed = true;
+                    }
+                });
+
+                nodes.push({
+                    id: "Root", parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
+                    employeeName: rootEmployee ? cleanString(rootEmployee["Full Name"]) : "",
+                    employeeId: rootEmployee ? cleanString(rootEmployee["Employee Id"]) : "",
+                    designation: rootEmployee ? cleanString(rootEmployee["Current Designation"]) : ""
+                });
+                nodeMap.add("Root");
+
+                const deptEmployeesList = {};
+                sheet1Data.forEach(row => {
+                    if (row._processed) return;
+                    const name = cleanString(row["Full Name"]);
+                    if (!name || name === "Unknown" || !row["Employee Id"]) return;
+
+                    const phase = cleanString(row["Phase"]);
+                    const func = cleanString(row["Functions"]);
+                    const dept = cleanString(row["Current Department"]);
+                    const phaseId = `Phase_${phase}`;
+                    const funcId = `${phaseId}_Func_${func}`;
+                    const deptId = `${funcId}_Dept_${dept}`;
+
+                    if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
+                    if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
+                    if (!nodeMap.has(deptId)) {
+                        const dEmp = deptEmployees[dept];
+                        nodes.push({
+                            id: deptId, parentId: funcId, name: dept, type: "department",
+                            employeeName: dEmp ? cleanString(dEmp["Full Name"]) : "",
+                            employeeId: dEmp ? cleanString(dEmp["Employee Id"]) : "",
+                            designation: dEmp ? cleanString(dEmp["Current Designation"]) : ""
+                        });
+                        nodeMap.add(deptId);
+                    }
+
+                    if (!deptEmployeesList[deptId]) deptEmployeesList[deptId] = [];
+                    const pInfo = powerMap[cleanString(row["Current Designation"]).toUpperCase()] || { level: 99 };
+                    deptEmployeesList[deptId].push({
+                        id: `Emp_${row["Employee Id"]}`, name: name, designation: cleanString(row["Current Designation"]),
+                        type: (name === "Vacant Position") ? "vacancy" : "employee", employeeId: row["Employee Id"], level: pInfo.level
+                    });
+                });
+
+                Object.keys(deptEmployeesList).forEach(deptId => {
+                    const emps = deptEmployeesList[deptId];
+                    const levelsObj = {};
+                    emps.forEach(emp => { if (!levelsObj[emp.level]) levelsObj[emp.level] = []; levelsObj[emp.level].push(emp); });
+                    const sortedLevels = Object.keys(levelsObj).map(Number).sort((a, b) => a - b);
+                    let currentParentId = deptId;
+                    sortedLevels.forEach(level => {
+                        const levelEmps = levelsObj[level];
+                        levelEmps.forEach(emp => { nodes.push({ ...emp, parentId: currentParentId }); });
+                        currentParentId = levelEmps[0].id;
+                    });
+                });
+
+                const childrenMap = {};
+                nodes.forEach(n => { if (n.parentId) { if (!childrenMap[n.parentId]) childrenMap[n.parentId] = []; childrenMap[n.parentId].push(n.id); } });
+
+                function calculateCounts(nodeId) {
+                    const node = nodes.find(n => n.id === nodeId);
+                    if (!node) return { r: 0, v: 0 };
+                    let r = node.type === 'employee' ? 1 : 0;
+                    let v = node.type === 'vacancy' ? 1 : 0;
+                    if ((node.type === 'root' || node.type === 'department') && node.employeeName && node.employeeName !== 'Unknown') {
+                        if (node.employeeName === 'Vacant Position') v++; else r++;
+                    }
+                    (childrenMap[nodeId] || []).forEach(childId => { const c = calculateCounts(childId); r += c.r; v += c.v; });
+                    node.reportees = r; node.vacancies = v;
+                    return { r, v };
+                }
+                calculateCounts("Root");
+
+                renderChart(nodes);
+                populateDropdowns();
+                loadingEl.style.display = 'none';
+            } catch (err) {
+                loadingEl.innerText = 'Error loading data.';
+                console.error(err);
+            }
+        }
+
+        let activeNodeId = null;
+
+        function renderChart(data) {
+            window.chart = new d3.OrgChart()
+                .container('.chart-container')
+                .data(data)
+                .nodeWidth(d => 260)
+                .nodeHeight(d => (d.data.employeeName || d.data.type === 'employee' || d.data.type === 'vacancy') ? 160 : 115)
+                .onNodeClick(d => {
+                    activeNodeId = d.data.id;
+                    window.chart.clearHighlighting();
+                    window.chart.setUpToTheRootHighlighted(d.data.id).render();
+                })
+                .linkUpdate(function (d, i, arr) {
+                    d3.select(this)
+                        .attr('stroke', document.body.classList.contains('dark-theme') ? '#0ea5e9' : '#6366f1')
+                        .attr('stroke-width', document.body.classList.contains('dark-theme') ? 3 : 2)
+                        .style('filter', document.body.classList.contains('dark-theme') ? 'drop-shadow(0 0 5px rgba(14, 165, 233, 0.8))' : 'none');
+                })
+                .nodeContent(function (d) {
+                    const isDark = document.body.classList.contains('dark-theme');
+                    const bgColor = isDark ? '#1e293b' : '#ffffff';
+                    const textColor = isDark ? '#f1f5f9' : '#1e293b';
+                    const subColor = isDark ? '#94a3b8' : '#64748b';
+                    let color = '#6366f1';
+                    let title = d.data.designation ? d.data.designation.toUpperCase() : '';
+
+                    switch (d.data.type) {
+                        case 'root': color = '#10b981'; break;
+                        case 'phase': color = '#3b82f6'; title = 'PHASE'; break;
+                        case 'function': color = '#f59e0b'; title = 'FUNCTION'; break;
+                        case 'department': color = '#8b5cf6'; break;
+                        case 'employee': color = '#0ea5e9'; break;
+                        case 'vacancy': color = '#ef4444'; title = title || 'VACANT POSITION'; break;
+                    }
+
+                    let extra = '';
+                    if (d.data.employeeName) {
+                        extra = `<div style="font-size:15px;font-weight:700;color:${textColor};margin-top:8px;">${d.data.employeeName}</div>`;
+                        if (d.data.employeeId) extra += `<div style="font-size:12px;color:${subColor};">ID: ${d.data.employeeId}</div>`;
+                    } else if (d.data.type === 'employee' || d.data.type === 'vacancy') {
+                        extra = `<div style="font-size:15px;font-weight:700;color:${textColor};margin-top:8px;">${d.data.name}</div>`;
+                        if (d.data.employeeId) extra += `<div style="font-size:12px;color:${subColor};">ID: ${d.data.employeeId}</div>`;
+                    }
+
+                    const updateBtn = (d.data.type === 'vacancy') ?
+                        `<button onclick="event.stopPropagation(); showUpdateModal('${d.data.employeeId}')" style="margin-top:10px;padding:6px 12px;font-size:11px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Update Details</button>` : '';
+
+                    return `<div style="font-family:'Inter',sans-serif;background-color:${bgColor};width:${d.width}px;height:${d.height}px;border-radius:12px;border-top:5px solid ${color};padding:15px;box-sizing:border-box;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">
+                        <div style="font-size:11px;color:${color};font-weight:700;letter-spacing:0.05em;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;">${title}</div>
+                        ${(d.data.type !== 'employee' && d.data.type !== 'vacancy') ? `<div style="font-size:16px;font-weight:700;color:${textColor};margin-top:4px;">${d.data.name}</div>` : ''}
+                        ${extra}
+                        ${updateBtn}
+                        <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:12px;font-weight:600;color:${subColor};">
+                            <div><span style="color:#10b981;margin-right:3px;">*</span>Rep: ${d.data.reportees || 0}</div>
+                            <div><span style="color:#ef4444;margin-right:3px;">*</span>Vac: ${d.data.vacancies || 0}</div>
+                        </div>
+                    </div>`;
+                })
+                .render();
+            setTimeout(() => { if (window.chart) window.chart.collapseAll().fit(); }, 200);
+        }
+
+        window.showAddVacancyModal = function () { document.getElementById('add-vacancy-modal').style.display = 'flex'; };
+        window.closeModal = function (id) { document.getElementById(id).style.display = 'none'; };
+
+        function populateDropdowns() {
+            const depts = [...new Set(sheet1Data.map(r => cleanString(r["Current Department"])).filter(d => d !== "Unknown"))];
+            const desigs = [...new Set(sheet1Data.map(r => cleanString(r["Current Designation"])).filter(d => d !== "Unknown"))];
+            const managers = sheet1Data.map(r => ({ name: cleanString(r["Full Name"]), id: r["Employee Id"] })).filter(m => m.name !== "Vacant Position");
+
+            const setupSelect = (id, options) => {
+                const el = document.getElementById(id);
+                el.innerHTML = options.map(o => `<option value="${o.value || o}">${o.label || o}</option>`).join('');
+                if (el.tomselect) el.tomselect.destroy();
+                new TomSelect(`#${id}`, { create: false, sortField: { field: "text", direction: "asc" } });
+            };
+
+            setupSelect('vac-dept', depts); setupSelect('vac-desig', desigs);
+            setupSelect('vac-manager', managers.map(m => ({ label: `${m.name} (${m.id})`, value: m.name })));
+            setupSelect('upd-func', [...new Set(sheet1Data.map(r => cleanString(r["Functions"])))]);
+            setupSelect('upd-phase', [...new Set(sheet1Data.map(r => cleanString(r["Phase"])))]);
+            setupSelect('upd-cadre', ["Management", "Non-Management", "Staff", "Worker"]);
+        }
+
+        document.getElementById('add-vacancy-form').onsubmit = async (e) => {
+            e.preventDefault();
+            await submitToSheet({
+                action: "addVacancy",
+                department: document.getElementById('vac-dept').value,
+                designation: document.getElementById('vac-desig').value,
+                reportingManager: document.getElementById('vac-manager').value
+            });
+            closeModal('add-vacancy-modal');
+        };
+
+        window.showUpdateModal = function (vacId) {
+            document.getElementById('target-vac-id').value = vacId;
+            document.getElementById('update-details-modal').style.display = 'flex';
+        };
+
+        document.getElementById('update-details-form').onsubmit = async (e) => {
+            e.preventDefault();
+            await submitToSheet({
+                action: "updateVacancy",
+                targetVacancyId: document.getElementById('target-vac-id').value,
+                fields: {
+                    "Employee Id": document.getElementById('upd-emp-id').value,
+                    "Full Name": document.getElementById('upd-emp-name').value,
+                    "Date of Birth": document.getElementById('upd-dob').value,
+                    "Date of Joining": document.getElementById('upd-doj').value,
+                    "Gender": document.getElementById('upd-gender').value,
+                    "Grade": document.getElementById('upd-grade').value,
+                    "Official Email Address": document.getElementById('upd-email').value,
+                    "Total Experience": document.getElementById('upd-total-exp').value,
+                    "Confirmation Status": document.getElementById('upd-confirm').value,
+                    "Current Experience": document.getElementById('upd-curr-exp').value,
+                    "Functions": document.getElementById('upd-func').value,
+                    "Management Cadre": document.getElementById('upd-cadre').value,
+                    "Phase": document.getElementById('upd-phase').value
+                }
+            });
+            closeModal('update-details-modal');
+        };
+
+        async function submitToSheet(data) {
+            try {
+                await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(data)
+                });
+                alert("Submitted successfully.");
+            } catch (err) { alert("Submission failed."); }
+        }
+
+        window.downloadPNG = function () {
+            if (!window.chart) return;
+
+            if (activeNodeId) {
+                // Collapse all unselected branches and only expand the selected one
+                window.chart.collapseAll();
+                const state = window.chart.getChartState();
+                let curr = state.allNodes.find(n => n.data.id === activeNodeId);
+                while (curr) {
+                    window.chart.setExpanded(curr.data.id);
+                    curr = curr.parent;
+                }
+                window.chart.setExpanded(activeNodeId);
+                window.chart.render().fit();
+            }
+
+            // Wait for animations before exporting
+            setTimeout(() => {
+                window.chart.exportImg({
+                    full: true, scale: 3,
+                    onAfterExport: (dataUrl) => {
+                        const link = document.createElement('a');
+                        link.download = `Org_Chart_${Date.now()}.png`;
+                        link.href = dataUrl; link.click();
+                    }
+                });
+            }, 600);
+        };
+
+        window.toggleTheme = function () {
+            document.body.classList.toggle('dark-theme');
+            document.body.classList.toggle('light-theme');
+            if (window.chart) window.chart.render();
+        };
+    </script>
+</body>
+
+</html>
