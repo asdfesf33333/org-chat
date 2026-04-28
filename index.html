@@ -275,14 +275,6 @@
         </div>
     </div>
 
-    <!-- 
-      ==============================================================================
-      ! AUTHORIZED ACCESS ONLY !
-      ENC-SEC-KEY: [V2-Nagpur-Plant]
-      DATA-STATUS: PROTECTED
-      ==============================================================================
-      This elements tab contains restricted corporate data.
-    -->
     <div id="restricted-notice" style="display:none;" data-encryption="AES-256-GCM"
         data-notice="RESTRICTED CORPORATE ASSET">
     </div>
@@ -426,7 +418,13 @@
     </div>
 
     <script>
-        // --- Configuration & Obfuscated URLs ---
+        // Domain Locking
+        const authorizedDomains = ['localhost', '127.0.0.1', 'github.io']; 
+        if (!authorizedDomains.some(d => window.location.hostname.includes(d)) && window.location.hostname !== "") {
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#ef4444;font-family:sans-serif;text-align:center;padding:20px;"><div><h1>UNAUTHORIZED DOMAIN</h1><p>This dashboard is restricted to authorized servers only.</p></div></div>';
+            throw new Error("Domain Locked");
+        }
+
         // --- Configuration & Obfuscated URLs ---
         const _atob = (s) => {
             try {
@@ -523,108 +521,83 @@
             const loadingEl = document.getElementById('loading');
             loadingEl.style.display = 'block';
             try {
+                // Clear container for fresh render
+                document.querySelector('.chart-container').innerHTML = '';
+
                 const [mainRes, powerRes] = await Promise.all([
                     new Promise((res, rej) => Papa.parse(mainUrl, { download: true, header: true, complete: res, error: rej })),
                     new Promise((res, rej) => Papa.parse(powerUrl, { download: true, header: true, complete: res, error: rej }))
                 ]);
 
-                sheet1Data = mainRes.data;
+                sheet1Data = mainRes.data.filter(r => r["Full Name"]);
                 const powerMap = {};
                 powerRes.data.forEach(row => {
                     const desig = row["Current Designation"];
                     if (desig) powerMap[desig.toUpperCase()] = {
-                        level: parseInt(row["Level"]) || 99,
-                        corresponding: (row["Corresponding"] || "").trim()
+                        level: parseInt(row["Level"]) || 99
                     };
                 });
 
+                // Map Names to IDs for robust parenting
+                const nameToIdMap = {};
+                sheet1Data.forEach(row => {
+                    if (row["Employee Id"] && row["Full Name"]) {
+                        nameToIdMap[cleanString(row["Full Name"])] = row["Employee Id"];
+                    }
+                });
+
                 const nodes = [];
-                const nodeMap = new Set();
-                let rootEmployee = null;
-                const deptEmployees = {};
-
-                sheet1Data.forEach(row => {
-                    const desig = cleanString(row["Current Designation"]);
-                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
-                    if (pInfo.corresponding.toLowerCase() === "root") { rootEmployee = row; row._processed = true; }
-                    else if (pInfo.corresponding.toLowerCase() === "current department") {
-                        const dept = cleanString(row["Current Department"]);
-                        if (!deptEmployees[dept]) deptEmployees[dept] = row;
-                        row._processed = true;
-                    }
-                });
-
+                const rootId = "Avaada_Root";
+                
+                // Base Root Node
                 nodes.push({
-                    id: "Root", parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
-                    employeeName: rootEmployee ? cleanString(rootEmployee["Full Name"]) : "",
-                    employeeId: rootEmployee ? cleanString(rootEmployee["Employee Id"]) : "",
-                    designation: rootEmployee ? cleanString(rootEmployee["Current Designation"]) : ""
+                    id: rootId, parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
+                    employeeName: "Corporate Structure", designation: "NAGPUR PLANT"
                 });
-                nodeMap.add("Root");
 
-                const deptEmployeesList = {};
                 sheet1Data.forEach(row => {
-                    if (row._processed) return;
+                    const id = row["Employee Id"];
                     const name = cleanString(row["Full Name"]);
-                    if (!name || name === "Unknown" || !row["Employee Id"]) return;
+                    const managerName = cleanString(row["Reporting Manager"]);
+                    const desig = cleanString(row["Current Designation"]);
+                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
 
-                    const phase = cleanString(row["Phase"]);
-                    const func = cleanString(row["Functions"]);
-                    const dept = cleanString(row["Current Department"]);
-                    const phaseId = `Phase_${phase}`;
-                    const funcId = `${phaseId}_Func_${func}`;
-                    const deptId = `${funcId}_Dept_${dept}`;
-
-                    if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
-                    if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
-                    if (!nodeMap.has(deptId)) {
-                        const dEmp = deptEmployees[dept];
-                        nodes.push({
-                            id: deptId, parentId: funcId, name: dept, type: "department",
-                            employeeName: dEmp ? cleanString(dEmp["Full Name"]) : "",
-                            employeeId: dEmp ? cleanString(dEmp["Employee Id"]) : "",
-                            designation: dEmp ? cleanString(dEmp["Current Designation"]) : ""
-                        });
-                        nodeMap.add(deptId);
+                    let parentId = rootId; // Default to root
+                    if (managerName && managerName !== "Avaada" && nameToIdMap[managerName]) {
+                        parentId = nameToIdMap[managerName];
                     }
 
-                    if (!deptEmployeesList[deptId]) deptEmployeesList[deptId] = [];
-                    const pInfo = powerMap[cleanString(row["Current Designation"]).toUpperCase()] || { level: 99 };
-                    deptEmployeesList[deptId].push({
-                        id: `Emp_${row["Employee Id"]}`, name: name, designation: cleanString(row["Current Designation"]),
-                        type: (name === "Vacant Position") ? "vacancy" : "employee", employeeId: row["Employee Id"], level: pInfo.level
+                    nodes.push({
+                        id: id,
+                        parentId: parentId,
+                        name: name,
+                        employeeName: name,
+                        employeeId: id,
+                        designation: desig,
+                        type: (name === "Vacant Position") ? "vacancy" : "employee",
+                        level: pInfo.level,
+                        reportees: 0,
+                        vacancies: 0
                     });
                 });
 
-                Object.keys(deptEmployeesList).forEach(deptId => {
-                    const emps = deptEmployeesList[deptId];
-                    const levelsObj = {};
-                    emps.forEach(emp => { if (!levelsObj[emp.level]) levelsObj[emp.level] = []; levelsObj[emp.level].push(emp); });
-                    const sortedLevels = Object.keys(levelsObj).map(Number).sort((a, b) => a - b);
-                    let currentParentId = deptId;
-                    sortedLevels.forEach(level => {
-                        const levelEmps = levelsObj[level];
-                        levelEmps.forEach(emp => { nodes.push({ ...emp, parentId: currentParentId }); });
-                        currentParentId = levelEmps[0].id;
-                    });
+                // Calculate reportee/vacancy counts
+                const nodeLookup = {};
+                nodes.forEach(n => nodeLookup[n.id] = n);
+                nodes.forEach(n => {
+                    if (n.parentId && nodeLookup[n.parentId]) {
+                        if (n.type === 'vacancy') nodeLookup[n.parentId].vacancies++;
+                        else nodeLookup[n.parentId].reportees++;
+                    }
                 });
 
-                const childrenMap = {};
-                nodes.forEach(n => { if (n.parentId) { if (!childrenMap[n.parentId]) childrenMap[n.parentId] = []; childrenMap[n.parentId].push(n.id); } });
-
-                function calculateCounts(nodeId) {
-                    const node = nodes.find(n => n.id === nodeId);
-                    if (!node) return { r: 0, v: 0 };
-                    let r = node.type === 'employee' ? 1 : 0;
-                    let v = node.type === 'vacancy' ? 1 : 0;
-                    if ((node.type === 'root' || node.type === 'department') && node.employeeName && node.employeeName !== 'Unknown') {
-                        if (node.employeeName === 'Vacant Position') v++; else r++;
-                    }
-                    (childrenMap[nodeId] || []).forEach(childId => { const c = calculateCounts(childId); r += c.r; v += c.v; });
-                    node.reportees = r; node.vacancies = v;
-                    return { r, v };
-                }
-                calculateCounts("Root");
+                renderChart(nodes);
+                populateDropdowns();
+                loadingEl.style.display = 'none';
+            } catch (err) {
+                loadingEl.innerText = 'Sync failed. Retrying...';
+                console.error(err);
+            }
 
                 renderChart(nodes);
                 populateDropdowns();
@@ -649,10 +622,30 @@
                     window.chart.setUpToTheRootHighlighted(d.data.id).render();
                 })
                 .linkUpdate(function (d, i, arr) {
+                    const isDark = document.body.classList.contains('dark-theme');
+                    const color = isDark ? '#00ffff' : '#6366f1';
+                    
                     d3.select(this)
-                        .attr('stroke', document.body.classList.contains('dark-theme') ? '#0ea5e9' : '#6366f1')
-                        .attr('stroke-width', document.body.classList.contains('dark-theme') ? 3 : 2)
-                        .style('filter', document.body.classList.contains('dark-theme') ? 'drop-shadow(0 0 5px rgba(14, 165, 233, 0.8))' : 'none');
+                        .attr('stroke', color)
+                        .attr('stroke-width', isDark ? 4 : 2)
+                        .style('filter', isDark ? 'drop-shadow(0 0 10px rgba(0, 255, 255, 0.9))' : 'none');
+
+                    // Definitive SVG Arrows
+                    const svg = d3.select(this.ownerSVGElement);
+                    if (svg.select('#arrowhead').empty()) {
+                        svg.append('defs').append('marker')
+                            .attr('id', 'arrowhead')
+                            .attr('viewBox', '0 -5 10 10')
+                            .attr('refX', 22)
+                            .attr('refY', 0)
+                            .attr('markerWidth', 7)
+                            .attr('markerHeight', 7)
+                            .attr('orient', 'auto')
+                            .append('path')
+                            .attr('d', 'M0,-5L10,0L0,5')
+                            .attr('fill', color);
+                    }
+                    d3.select(this).attr('marker-end', 'url(#arrowhead)');
                 })
                 .nodeContent(function (d) {
                     const isDark = document.body.classList.contains('dark-theme');
