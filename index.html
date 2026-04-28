@@ -237,29 +237,27 @@
         }
 
         /* Tom Select Dark Mode Fixes */
-        .ts-control {
-            border-radius: 0.5rem !important;
-            padding: 0.6rem 1rem !important;
-            border: 1px solid #ddd !important;
+        .ts-wrapper .ts-control {
+            background-color: var(--card-light) !important;
+            color: var(--text-light) !important;
         }
-
-        .dark-theme .ts-control,
-        .dark-theme .ts-control input {
-            background-color: #1e293b !important;
-            color: #fff !important;
+        .dark-theme .ts-wrapper .ts-control {
+            background-color: var(--card-dark) !important;
+            color: var(--text-dark) !important;
             border-color: rgba(255, 255, 255, 0.1) !important;
         }
-
-        .dark-theme .ts-dropdown,
-        .dark-theme .ts-dropdown .option {
-            background-color: #1e293b !important;
-            color: #fff !important;
+        .dark-theme .ts-dropdown {
+            background-color: var(--card-dark) !important;
+            color: var(--text-dark) !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
         }
-
-        .dark-theme .ts-dropdown .option.active,
-        .dark-theme .ts-dropdown .option:hover {
-            background-color: #334155 !important;
-            color: #fff !important;
+        .dark-theme .ts-dropdown .option.active {
+            background-color: var(--primary) !important;
+            color: white !important;
+        }
+        .dark-theme .ts-dropdown .option {
+            background-color: var(--card-dark) !important;
+            color: var(--text-dark) !important;
         }
     </style>
 </head>
@@ -596,14 +594,6 @@
                 loadingEl.style.display = 'none';
             } catch (err) {
                 loadingEl.innerText = 'Sync failed. Retrying...';
-                console.error(err);
-            }
-
-                renderChart(nodes);
-                populateDropdowns();
-                loadingEl.style.display = 'none';
-            } catch (err) {
-                loadingEl.innerText = 'Error loading data.';
                 console.error(err);
             }
         }
