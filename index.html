@@ -527,138 +527,67 @@
                     new Promise((res, rej) => Papa.parse(powerUrl, { download: true, header: true, complete: res, error: rej }))
                 ]);
 
-                sheet1Data = mainRes.data.filter(r => r["Full Name"]);
+                sheet1Data = mainRes.data.filter(r => r["Full Name"] && r["Employee Id"]);
                 const powerMap = {};
                 powerRes.data.forEach(row => {
                     const desig = row["Current Designation"];
                     if (desig) powerMap[desig.toUpperCase()] = {
-                        level: parseInt(row["Level"]) || 99,
-                        corresponding: (row["Corresponding"] || "").trim()
+                        level: parseInt(row["Level"]) || 99
                     };
                 });
 
+                // Map Names to IDs for strict reporting
+                const nameToIdMap = {};
+                sheet1Data.forEach(row => {
+                    nameToIdMap[cleanString(row["Full Name"])] = row["Employee Id"];
+                });
+
                 const nodes = [];
-                const nodeMap = new Set();
-                let rootEmployee = null;
-                const deptEmployees = {};
-
-                // Find specialized roles (Root/Dept Head)
-                sheet1Data.forEach(row => {
-                    const desig = cleanString(row["Current Designation"]);
-                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
-                    if (pInfo.corresponding.toLowerCase() === "root") { rootEmployee = row; row._processed = true; }
-                    else if (pInfo.corresponding.toLowerCase() === "current department") {
-                        const dept = cleanString(row["Current Department"]);
-                        if (!deptEmployees[dept]) deptEmployees[dept] = row;
-                        row._processed = true;
-                    }
-                });
-
-                // 1. Root Node
+                const rootId = "Avaada_Root";
+                
+                // 1. Root Node (Top level)
                 nodes.push({
-                    id: "Root", parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
-                    employeeName: rootEmployee ? cleanString(rootEmployee["Full Name"]) : "Nagpur Plant",
-                    employeeId: rootEmployee ? cleanString(rootEmployee["Employee Id"]) : "AVAADA",
-                    designation: rootEmployee ? cleanString(rootEmployee["Current Designation"]) : "CORPORATE"
+                    id: rootId, parentId: null, name: "Avaada (Nagpur Plant)", type: "root",
+                    employeeName: "Corporate Structure", designation: "NAGPUR PLANT"
                 });
-                nodeMap.add("Root");
 
-                const deptEmployeesList = {};
-
-                // 2. Build Categorical Branches and Assign Employees
+                // 2. Strict Reporting Manager Assignment
                 sheet1Data.forEach(row => {
-                    if (row._processed) return;
-                    const name = cleanString(row["Full Name"]);
                     const id = row["Employee Id"];
-                    if (!name || !id) return;
+                    const name = cleanString(row["Full Name"]);
+                    const managerName = cleanString(row["Reporting Manager"]);
+                    const desig = cleanString(row["Current Designation"]);
+                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
 
-                    const phase = cleanString(row["Phase"]) || "General";
-                    const func = cleanString(row["Functions"]) || "Operations";
-                    const dept = cleanString(row["Current Department"]) || "Plant";
-
-                    const phaseId = `Phase_${phase}`;
-                    const funcId = `${phaseId}_Func_${func}`;
-                    const deptId = `${funcId}_Dept_${dept}`;
-
-                    // Ensure branch nodes exist
-                    if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
-                    if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
-                    if (!nodeMap.has(deptId)) {
-                        const dEmp = deptEmployees[dept];
-                        nodes.push({
-                            id: deptId, parentId: funcId, name: dept, type: "department",
-                            employeeName: dEmp ? cleanString(dEmp["Full Name"]) : "",
-                            employeeId: dEmp ? cleanString(dEmp["Employee Id"]) : "",
-                            designation: dEmp ? cleanString(dEmp["Current Designation"]) : ""
-                        });
-                        nodeMap.add(deptId);
+                    // Default to root if no manager is found in the list
+                    let parentId = rootId;
+                    if (managerName && managerName !== "Avaada" && nameToIdMap[managerName]) {
+                        parentId = nameToIdMap[managerName];
                     }
 
-                    if (!deptEmployeesList[deptId]) deptEmployeesList[deptId] = [];
-                    const pInfo = powerMap[cleanString(row["Current Designation"]).toUpperCase()] || { level: 99 };
-                    
-                    deptEmployeesList[deptId].push({
+                    nodes.push({
                         id: id,
+                        parentId: parentId,
                         name: name,
                         employeeName: name,
                         employeeId: id,
-                        designation: cleanString(row["Current Designation"]),
+                        designation: desig,
                         type: (name === "Vacant Position") ? "vacancy" : "employee",
-                        level: pInfo.level
+                        level: pInfo.level,
+                        reportees: 0,
+                        vacancies: 0
                     });
                 });
 
-                // 3. Attach Employees to Departments with Level-based Parenting
-                Object.keys(deptEmployeesList).forEach(deptId => {
-                    const emps = deptEmployeesList[deptId];
-                    const levelsObj = {};
-                    emps.forEach(emp => { 
-                        if (!levelsObj[emp.level]) levelsObj[emp.level] = []; 
-                        levelsObj[emp.level].push(emp); 
-                    });
-                    
-                    const sortedLevels = Object.keys(levelsObj).map(Number).sort((a, b) => a - b);
-                    let currentParentId = deptId;
-                    
-                    sortedLevels.forEach(level => {
-                        const levelEmps = levelsObj[level];
-                        levelEmps.forEach(emp => { 
-                            nodes.push({ ...emp, parentId: currentParentId }); 
-                        });
-                        // The first person of the higher level becomes the parent for the next level
-                        currentParentId = levelEmps[0].id;
-                    });
-                });
-
-                // 4. Final Count Calculations
-                const childrenMap = {};
-                nodes.forEach(n => { 
-                    if (n.parentId) { 
-                        if (!childrenMap[n.parentId]) childrenMap[n.parentId] = []; 
-                        childrenMap[n.parentId].push(n.id); 
-                    } 
-                });
-
-                function calculateCounts(nodeId) {
-                    const node = nodes.find(n => n.id === nodeId);
-                    if (!node) return { r: 0, v: 0 };
-                    let r = (node.type === 'employee') ? 1 : 0;
-                    let v = (node.type === 'vacancy') ? 1 : 0;
-                    
-                    // Count head-count in grouping nodes
-                    if ((node.type === 'root' || node.type === 'department') && node.employeeName) {
-                        if (node.employeeName === 'Vacant Position') v++; else r++;
+                // 3. Final Count Calculations
+                const nodeLookup = {};
+                nodes.forEach(n => nodeLookup[n.id] = n);
+                nodes.forEach(n => {
+                    if (n.parentId && nodeLookup[n.parentId]) {
+                        if (n.type === 'vacancy') nodeLookup[n.parentId].vacancies++;
+                        else nodeLookup[n.parentId].reportees++;
                     }
-
-                    (childrenMap[nodeId] || []).forEach(childId => { 
-                        const c = calculateCounts(childId); 
-                        r += c.r; v += c.v; 
-                    });
-                    node.reportees = r; 
-                    node.vacancies = v;
-                    return { r, v };
-                }
-                calculateCounts("Root");
+                });
 
                 renderChart(nodes);
                 populateDropdowns();
@@ -684,29 +613,21 @@
                 })
                 .linkUpdate(function (d, i, arr) {
                     const isDark = document.body.classList.contains('dark-theme');
-                    const color = isDark ? '#00ffff' : '#6366f1';
+                    const color = isDark ? '#0ea5e9' : '#6366f1';
                     
                     d3.select(this)
                         .attr('stroke', color)
-                        .attr('stroke-width', isDark ? 4 : 2)
-                        .style('filter', isDark ? 'drop-shadow(0 0 10px rgba(0, 255, 255, 0.9))' : 'none');
-
-                    // Definitive SVG Arrows
-                    const svg = d3.select(this.ownerSVGElement);
-                    if (svg.select('#arrowhead').empty()) {
-                        svg.append('defs').append('marker')
-                            .attr('id', 'arrowhead')
-                            .attr('viewBox', '0 -5 10 10')
-                            .attr('refX', 22)
-                            .attr('refY', 0)
-                            .attr('markerWidth', 7)
-                            .attr('markerHeight', 7)
-                            .attr('orient', 'auto')
-                            .append('path')
-                            .attr('d', 'M0,-5L10,0L0,5')
-                            .attr('fill', color);
-                    }
-                    d3.select(this).attr('marker-end', 'url(#arrowhead)');
+                        .attr('stroke-width', isDark ? 3 : 2)
+                        .style('filter', isDark ? 'drop-shadow(0 0 5px rgba(14, 165, 233, 0.4))' : 'none');
+                })
+                .buttonContent(({ node, state }) => {
+                    const isDark = document.body.classList.contains('dark-theme');
+                    const color = isDark ? '#0ea5e9' : '#6366f1';
+                    return `<div style="color:${color};background:${isDark ? '#1e293b' : '#fff'};padding:4px;border-radius:50%;border:2px solid ${color};display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px ${isDark ? 'rgba(14, 165, 233, 0.5)' : 'rgba(0,0,0,0.1)'};">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4">
+                            ${node.children ? '<path d="M5 12h14"/>' : '<path d="M12 5v14M5 12h14"/>'}
+                        </svg>
+                    </div>`;
                 })
                 .nodeContent(function (d) {
                     const isDark = document.body.classList.contains('dark-theme');
