@@ -420,13 +420,6 @@
     </div>
 
     <script>
-        // Domain Locking
-        const authorizedDomains = ['github.io'];
-        if (!authorizedDomains.some(d => window.location.hostname.includes(d)) && window.location.hostname !== "avaada.com") {
-            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f172a;color:#ef4444;font-family:sans-serif;text-align:center;padding:20px;"><div><h1>UNAUTHORIZED DOMAIN</h1><p>This dashboard is restricted to authorized servers only.</p></div></div>';
-            throw new Error("Domain Locked");
-        }
-
         // --- Configuration & Obfuscated URLs ---
         const _atob = (s) => {
             try {
@@ -550,22 +543,14 @@
                 const nodes = [];
                 const nodeMap = new Set();
                 let rootEmployee = null;
-                const deptHeads = {}; // Dept Name -> Employee Row
 
-                // Step 1: Identify specialized roles (Root/Dept Head)
+                // Step 1: Identify specialized roles (Root)
                 sheet1Data.forEach(row => {
                     const desig = cleanString(row["Current Designation"]);
                     const pInfo = powerMap[desig.toUpperCase()] || { level: 99, corresponding: "" };
                     if (pInfo.corresponding.toLowerCase() === "root") {
                         rootEmployee = row;
                         row._isRoot = true;
-                    }
-                    else if (pInfo.corresponding.toLowerCase() === "current department") {
-                        const dept = cleanString(row["Current Department"]);
-                        if (!deptHeads[dept]) {
-                            deptHeads[dept] = row;
-                            row._isDeptHead = true;
-                        }
                     }
                 });
 
@@ -578,13 +563,20 @@
                 });
                 nodeMap.add("Root");
 
-                // Step 3: Process every employee
-                sheet1Data.forEach(row => {
-                    if (row._isRoot) return; // Already handled
+                // Step 3: Map and Sort Employees by Level
+                const processedEmployees = sheet1Data
+                    .filter(row => !row._isRoot)
+                    .map(row => {
+                        const desig = cleanString(row["Current Designation"]);
+                        const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
+                        return { ...row, _level: pInfo.level };
+                    })
+                    .sort((a, b) => a._level - b._level);
 
+                // Step 4: Process Categorical Structure and Employees
+                processedEmployees.forEach(row => {
                     const id = row["Employee Id"];
                     const name = cleanString(row["Full Name"]);
-                    const managerName = cleanString(row["Reporting Manager"]);
                     const desig = cleanString(row["Current Designation"]);
                     const deptName = cleanString(row["Current Department"]);
                     const phase = cleanString(row["Phase"]) || "General";
@@ -594,46 +586,27 @@
                     const funcId = `${phaseId}_Func_${func}`;
                     const deptId = `${funcId}_Dept_${deptName}`;
 
-                    // Handle Categorical Path
+                    // Ensure Categorical Nodes Exist
                     if (!nodeMap.has(phaseId)) { nodes.push({ id: phaseId, parentId: "Root", name: phase, type: "phase" }); nodeMap.add(phaseId); }
                     if (!nodeMap.has(funcId)) { nodes.push({ id: funcId, parentId: phaseId, name: func, type: "function" }); nodeMap.add(funcId); }
-                    if (!nodeMap.has(deptId)) {
-                        nodes.push({ id: deptId, parentId: funcId, name: deptName, type: "department" });
-                        nodeMap.add(deptId);
-                    }
+                    if (!nodeMap.has(deptId)) { nodes.push({ id: deptId, parentId: funcId, name: deptName, type: "department" }); nodeMap.add(deptId); }
 
-                    // Determine Parent
-                    let parentId = deptId; // Default fallback to department node
-
-                    if (row._isDeptHead) {
-                        // Dept Heads always sit under the Department Node
-                        parentId = deptId;
-                    } else {
-                        // Strict Reporting Manager Rule for everyone else
-                        if (managerName && nameToIdMap[managerName]) {
-                            parentId = nameToIdMap[managerName];
-                        } else if (deptHeads[deptName]) {
-                            // Fallback to Dept Head if manager not found
-                            parentId = deptHeads[deptName]["Employee Id"];
-                        }
-                    }
-
-                    const pInfo = powerMap[desig.toUpperCase()] || { level: 99 };
+                    // All employees report to their Department node (Pure Categorical)
                     nodes.push({
                         id: id,
-                        parentId: parentId,
+                        parentId: deptId,
                         name: name,
                         employeeName: name,
                         employeeId: id,
                         designation: desig,
                         type: (name === "Vacant Position") ? "vacancy" : "employee",
-                        level: pInfo.level,
+                        level: row._level,
                         reportees: 0,
                         vacancies: 0
                     });
                 });
 
-                // Step 4: Final Count Calculations
+                // Step 5: Final Count Calculations (Aggregation)
                 const nodeLookup = {};
                 nodes.forEach(n => nodeLookup[n.id] = n);
                 nodes.forEach(n => {
@@ -641,7 +614,7 @@
                         let curr = nodeLookup[n.parentId];
                         while (curr) {
                             if (n.type === 'vacancy') curr.vacancies++;
-                            else curr.reportees++;
+                            else if (n.type === 'employee') curr.reportees++;
                             if (!curr.parentId) break;
                             curr = nodeLookup[curr.parentId];
                         }
